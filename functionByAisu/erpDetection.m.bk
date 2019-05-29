@@ -1,0 +1,674 @@
+function [data]=erpDetection(totsub,filepath,isJackknife,electrodeNames,analysisParameter,MergeMode,plotOption,avgNameFormat)
+% Useage:
+%  [data]=erpDetection(totsub,filepath,isJackknife,electrodeNames,analysisParameter,MergeMode);
+%
+% measure the peak latency and amplitude using either peak or fraction area
+% 
+%  avg files should be constructed as the following rule:
+%  filepath: (mainfolder) > first directory e.g., 'C:\data\average'
+% 			conditionname: (second folder)  e.g., a folder named 'diff-in-neu-gfp'
+% 						 > eachSubAvgfile (avg file), e.g., '1-diff-in-neu-gfp';
+% 
+% Argins:
+% 
+% totsub,                       [Vector of Double]:  intger vector contain the name of the files, for example[2,4:8];
+% filepath,                               [string]:  directory name which contian the files
+% isJackknife,                           [boolean]:  using jackknife procedure or not {default: false}
+% electrodeNames,                 [cell of string]:  electrode names which has been slected to analysis
+%                                                    e.g, {'veog', 'f3','f4'}, both lower and upper case will be fine
+% analysisParameter                    [structure]:  a structure with the following fields:%
+%                  .TimeRange   [3d matrix double]: 1*2*n (conditions), a 3d matrix defined 
+% 													the ROI time windows for each condition
+%                  .PeakType              [string]:  The method used to find the peak,
+%                                                   should be of 'Max','Min','fractionArea','relative',
+%                                                  or 'average'[default]
+%                  .PeakCritertion    [string]:   The threshold used to define the fraction ration when use 'fractionArea' method%
+%                  .condition [cell of string]:   Cell of string to define the condition names
+%                                                 E.g., {'diff-in-neu-gfp','same-in-neu-gfp'}
+%                 .polarDirection     [double]:   either 1 or 0 [default] for 
+%                                                 positive and negative component respectively
+% MergeMode				   [string or struct]:    merge all channels or part of the chans acrording to 
+% 												  the configuration in "MergeMode".
+% (a: struct) 
+%     MergeMode(i).beMergedChans [cell of string]: defined the channames that supposed to be merged .
+%     MergeMode(i).mergedName            [string]: defined output chanNames.
+% 
+% (b: string)
+%                                       [string]: any string will cause merge all chans.
+% 
+% (c: [])
+%          if mergedMode is empty will do nothing.
+% plotOption                            [string]: should be of 'latency' or 'range'['default'] for plot a latency line and a filled range area respectively
+% 
+% Written by Allen Zhang in UMN
+% 15-Dec-2008
+% updated by yz
+% 2011-2-28
+% updated by yz
+% 2011-3-21
+%
+% Revised by YZ in NENU
+% ONLY SUPPORTS AVG FILE NOW!
+%
+% THE routine would automatically extract the Baseline and sample rate from
+% the avg file
+% 
+% 2011-5-26
+% Rev by YANG ZHANG
+% Sat May 23 21:15:01 2015
+% Added help info
+%
+% Added by Yang zhang 2015/7/8 1:59:26 
+% added support for merge chan operation.
+
+helpStr = {' Useage: '
+'  [data]=erpDetection(totsub,filepath,isJackknife,electrodeNames,analysisParameter,MergeMode); '
+'  '
+' measure the peak latency and amplitude using either peak or fraction area '
+'  '
+'  avg files should be constructed as the following rule: '
+'  filepath: (mainfolder) > first directory e.g., ''C:\data\average'' '
+'           conditionname: (second folder)  e.g., a folder named ''diff-in-neu-gfp'' '
+'                        > eachSubAvgfile (avg file), e.g., ''1-diff-in-neu-gfp''; '
+'  '
+' Argins: '
+'  '
+' totsub,                       [Vector of Double]:  intger vector contain the name of the files, for example[2,4:8]; '
+' filepath,                               [string]:  directory name which contian the files '
+' isJackknife,                           [boolean]:  using jackknife procedure or not {default: false} '
+' electrodeNames,                 [cell of string]:  electrode names which has been slected to analysis '
+'                                                    e.g, {''veog'', ''f3'',''f4''}, both lower and upper case will be fine '
+' analysisParameter                    [structure]:  a structure with the following fields:% '
+'                  .TimeRange   [3d matrix double]: 1*2*n (conditions), a 3d matrix defined  '
+'                                                   the ROI time windows for each condition '
+'                  .PeakType              [string]:  The method used to find the peak, '
+'                                                    should be of ''Max'',''Min'',''fractionArea'',''relative'', '
+'                                                    or ''average''[default] '
+'                  .PeakCritertion        [string]: The threshold used to define the fraction ration when use ''fractionArea'' method% '
+'                  .condition     [cell of string]: Cell of string to define the condition names '
+'                                                   E.g., {''diff-in-neu-gfp'',''same-in-neu-gfp''} '
+'                 .polarDirection         [double]: either 1 or 0 [default] for  '
+'                                                   positive and negative component respectively '
+' MergeMode                     [string or struct]: merge all channels or part of the chans acrording to  '
+'                                                   the configuration in "MergeMode". '
+' (a: struct)  '
+'     MergeMode(i).beMergedChans  [cell of string]: defined the channames that supposed to be merged . '
+'     MergeMode(i).mergedName             [string]: defined output chanNames. '
+'  '
+' (b: string) '
+'                                         [string]: any string will cause merge all chans. '
+'  '
+' (c: [])                                           if mergedMode is empty will do nothing. '
+' '
+' plotOption                              [string]: should be of ''latency'' or ''range''[''default''] for plot a latency line and a filled range area respectively '
+' avgNameFormat                           [string]: format define to construct the avg file name; e.g., avgNameFormat = ''anyString%sub%anyString'';% the string "%" is the delimeter string'
+'                                                   the sub means the subject number, and will be replaced by the real subject number'
+'  '
+' Written by Allen Zhang in UMN '
+' 15-Dec-2008 '
+' updated by yz '
+' 2011-2-28 '
+' updated by yz '
+' 2011-3-21 '
+'  '
+' Revised by YZ in NENU '
+' ONLY SUPPORTS AVG FILE NOW! '
+'  '
+' THE routine would automatically extract the Baseline and sample rate from '
+' the avg file '
+'  '
+' 2011-5-26 '
+' Rev by YANG ZHANG '
+' Sat May 23 21:15:01 2015 '
+' Added help info '
+'  '
+' Added by Yang zhang 2015/7/8 1:59:26  '
+' added support for merge chan operation.'};
+
+if nargin <1
+	data = [];
+	
+    for iRow = 1:numel(helpStr)
+        disp(helpStr{iRow});
+    end
+	return;
+end
+
+
+diary(fullfile(filepath,['erpDetection_',date,'.txt']));
+
+%-- check liense ----/
+checkLicense_bcl;
+%--------------------\
+
+try
+
+    
+    if ~exist('totsub','var')
+        totsub = 2:16;
+    end
+    
+    if ~exist('electrodeNames','var')
+        electrodeNames = {'CP3', 'Cz', 'CP4', 'P3', 'Pz' ,'P4'};
+    end
+
+    if ~exist('isJackknife','var')
+        isJackknife = false;
+    end
+    if ~exist('analysisParameter','var')
+        analysisParameter.TimeRange(:,:,1)= [-120 30];%[520 540];
+        analysisParameter.PeakType        = 'average';%'Max','Min' or 'fractionArea','relative',or 'average'
+        analysisParameter.condition       = {'diff-in-neu-gfp','same-in-neu-gfp'};
+        analysisParameter.PeakCritertion  = 0.5;
+        analysisParameter.polarDirection  = 0;% 0 for nagative
+    end
+    %-----------------
+    %-----------------
+    if size(analysisParameter.TimeRange,3)==1
+        analysisParameter.TimeRange = repmat(analysisParameter.TimeRange,[1 1 numel(analysisParameter.condition)]);
+    end
+    
+    if size(analysisParameter.TimeRange,1)==1
+        analysisParameter.TimeRange = repmat(analysisParameter.TimeRange,numel(totsub),1);
+    end
+    
+    if ~exist('MergeMode','var')
+            MergeMode = [];
+    end
+    if ~exist('plotOption','var')||isempty(plotOption)
+        plotOption = 'range';
+    end
+    plotOption = lower(plotOption);
+
+    if ~ismember(plotOption,{'latency','range'})
+        error('plotOption SHOULD BE OF ''latency'' or ''range''!');
+    end
+
+    if ~exist('avgNameFormat','var')||isempty(avgNameFormat)
+        avgNameFormat = [];
+    end
+
+    % avgNameFormat = 'anyString%sub%anyString';% the string "%"is the delimeter string
+
+    nameSects =  regexp(avgNameFormat,'%','split');
+    nameFormatIdx =  ismember(nameformats,'sub');
+
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %                              BEGIN
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    disp(['Directory           =',filepath]);
+    disp(['detection method   = ',analysisParameter.PeakType]);
+    disp(['Peak    Critertion = ',num2str(analysisParameter.PeakCritertion*100),'%']);
+    disp('subject numbers:');
+    fprintf('%d ',totsub); fprintf('\n');
+    disp('Detected condition names: ');
+    disp(analysisParameter.condition);
+    %%%%
+    TimeRange      = analysisParameter.TimeRange;
+    PeakType       = analysisParameter.PeakType;
+    condition      = analysisParameter.condition;
+    polarDirection = analysisParameter.polarDirection;
+    
+    data.con_name = condition(:); % Force it to be a column.
+    
+    if isempty(filepath)
+        return;
+    end;
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %       begin
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    TLatency   =[];
+    Tamplitude =[];
+
+    %%%%%%% reading data %%%%%%%%%%
+    for iCond=1:length(condition)
+        for iSub=1:length(totsub)
+            
+
+            nameSects(nameFormatIdx) = {num2str(totsub(iSub))};
+            nameStrings              = sprintf('%s',nameSects{:});
+
+            cAvgFilename = fullfile(filepath,data.con_name{iCond},sprintf('%s-%s',nameStrings,[data.con_name{iCond},'.avg']));
+            disp(cAvgFilename);
+
+            [tempA,chanName] = loadavg_bcl(cAvgFilename,electrodeNames);
+            
+
+            %---- merge chan data ---------/
+            if ~isempty(MergeMode)
+                if ischar(MergeMode)
+                    tempA             =mean(tempA,2);
+                    
+                    chanName(1,1:4)   =double('mean');
+                    chanName(2:end,:) =[];
+
+                elseif isstruct(MergeMode)
+
+                    %----- get chan names in string -------/
+                    chanNamesStr = cell(size(chanName,1),1);
+
+                    for iChan = 1:size(chanName,1)
+                        chanNamesStr{iChan,1} = deblank(char(chanName(iChan,:)));
+                    end
+                    %--------------------------------------\
+
+                    mergedData     = zeros(size(tempA,1),numel(MergeMode));
+                    mergedChanName = chanName(1:numel(MergeMode),:);
+
+                    for iMerge = 1:numel(MergeMode)
+                        [Noused, cBeMergedChanIdx] = ismember(MergeMode(iMerge).beMergedChans,chanNamesStr); %#ok<*ASGLU>
+
+                        if any(~cBeMergedChanIdx) % incase ther is no matched chan in the avg file
+                            failedChanIdx = find(~cBeMergedChanIdx);
+                            errorStr = ['Error: failed to get matched chan in avg file:',char(10)];
+                            for iFailedChan = 1:numel(failedChanIdx)
+                                errorStr = [errorStr,MergeMode(iMerge).beMergedChans{failedChanIdx(iFailedChan)},char(10)];
+                            end
+
+                            error(errorStr);
+                        end
+
+                        mergedData(:,iMerge) = mean(tempA(:,cBeMergedChanIdx),2);
+                        mergedChanName(iMerge,1:numel(MergeMode(iMerge).mergedName)) = double(MergeMode(iMerge).mergedName);
+                    end
+                       tempA    = mergedData;
+                       chanName = mergedChanName;  
+                else
+                    error('mergeMode should be either string or a struct!');
+                end 
+            end % merge
+            %------------------------------\
+
+
+
+            %-------------------------
+            if iSub==1&&iCond==1
+                hdr = scanHead(cAvgFilename);
+                if (round(hdr.pnts/hdr.rate*1000))~=round((hdr.autoMax-hdr.autoMin)*1000)
+                    error('Baseline determination error !!!');
+                end
+                
+                disp('Detection TimeRange: ');
+                for iDim = 1:size(TimeRange,3)
+                    disp(['Cond ',numel(iDim),': ',analysisParameter.condition{iDim}]);
+                    disp('---------------------------------------');
+
+                    if size(unique(TimeRange(:,:,iDim),'rows'),1) == 1
+                        disp(TimeRange(1,:,iDim));
+                    else
+                        disp(TimeRange(:,:,iDim));
+                    end
+                end
+                
+				SampleRate = hdr.rate;
+				Baseline   = 1000*hdr.autoMin;
+                %
+                disp(['Baseline            =',num2str(1000*hdr.autoMin)]);
+                disp(['SampleRate          =',num2str(SampleRate)]);
+                
+                TimeRange = binTimeTransf(TimeRange,Baseline,SampleRate,1);
+                % binOrTimeOut = binTimeTransf(binOrTimeIn,Baseline,fs,transfType)
+                disp('Detection TimeRange in bin unit ');
+                for iDim = 1:size(TimeRange,3)
+
+                    if size(unique(TimeRange(:,:,iDim),'rows'),1) == 1
+                        disp(TimeRange(1,:,iDim));
+                    else
+                        disp(TimeRange(:,:,iDim));
+                    end
+
+                end
+                disp(' ');
+                
+                disp('selected chans:')
+                disp(electrodeNames);
+                disp('-------');
+                disp('out chans:');
+                disp(char(chanName));
+            end
+            %-------------------------
+            disp(['reading  ... ',cAvgFilename]);
+            data.exp(iCond,1).OrData(:,:,iSub)= tempA;
+            %
+        end
+    end
+    %%%%%%% reading data end %%%%%%%%%%
+    
+    %============== start jackknife procedure ==============/
+    if isJackknife
+        disp('====== Using N but 1 resample procedure (Jackknife)=====')
+        % using N but 1 resample method to deal with the data
+        for iCond = 1:length(condition)
+            allOrData = data.exp(iCond,1).OrData;
+
+            data.exp(iCond,1).jackknife = zeros(size(allOrData));
+            %--- using n but 1 resampling method to increase the statistical power ---/
+            for iSub = 1:length(totsub)
+				jackIdx       = logical(ones(1,length(totsub))); %#ok<LOGL>
+				jackIdx(iSub) = 0;
+                
+                data.exp(iCond,1).jackknife(:,:,iSub)=mean(allOrData(:,:,jackIdx),3);
+                disp(['condition =',data.con_name{iCond},' sub =',num2str(iSub),' orignal iSub = ',num2str(totsub(iSub))]);
+            end
+            %------------------------------------------------------------------------\
+            
+        end
+    end
+    %=======================================================\
+    
+
+    %%%%%%% caculating amplitudes and latencies %%%%%%%%%%%%%%%
+    for iCond=1:length(condition)
+
+		Latency_temp   =[];
+		Amplitude_temp =[];
+
+        for iSub=1:length(totsub)
+            if isJackknife
+                tempA = data.exp(iCond,1).jackknife(:,:,iSub);
+            else
+                tempA = data.exp(iCond,1).OrData(:,:,iSub);
+            end
+            
+            temp = tempA(round(TimeRange(iSub,1,iCond)):round(TimeRange(iSub,2,iCond)),:); % bug fix: the time bin is alread correct there is no need to added 1 
+           	
+           	switch lower(PeakType)
+           	case 'min'
+                [amplitude,latency] = min(temp);
+           	case 'max'
+                [amplitude,latency] = max(temp);
+           	case 'fractionarea'
+                [amplitude,latency] = fractionArea(temp,analysisParameter.PeakCritertion,polarDirection);
+           	case 'average'
+				amplitude = mean(temp);
+				latency   = amplitude;
+            case 'mean' % added by yang 20150809
+				amplitude = mean(temp);
+				latency   = amplitude;        
+           	case 'relative'
+                [amplitude,latency] = relativeAmpli(temp,analysisParameter.PeakCritertion,polarDirection);
+           	otherwise
+           		error('PeakType should be of {''Min'',''Max'',''fractionArea'',''average'',''mean'',''relative''}');
+           	end
+
+            %--- transform the bin unit back to ms -----/
+            latency = binTimeTransf(latency + TimeRange(iSub,1,iCond)-1 ,Baseline,SampleRate,2);
+            %-------------------------------------------\
+            
+			data.sub(iSub,1).exp(iCond,1).latency   = latency;
+			data.sub(iSub,1).exp(iCond,1).amplitude = amplitude;
+            
+			Latency_temp   = [Latency_temp;latency]; %#ok<AGROW>
+			Amplitude_temp = [Amplitude_temp;amplitude]; %#ok<AGROW>
+        end
+        
+		TLatency   = [TLatency,Latency_temp]; %#ok<AGROW>
+		Tamplitude = [Tamplitude,Amplitude_temp]; %#ok<AGROW>
+    end
+    %%%%%%% caculating amplitudes and latencies end %%%%%%%%%%%%%%%
+
+
+
+    %%%%%%% plot result %%%%%%%%%%%%%%%
+	subplotRows    = floor(sqrt(size(chanName,1)));
+	subplotColumns = ceil((size(chanName,1)/subplotRows));
+
+    tempA          = [];
+    
+    for iSub=1:length(totsub)
+        for iCond=1:length(condition)
+            if isJackknife
+                tempA(:,:,iCond) = data.exp(iCond,1).jackknife(:,:,iSub);
+            else
+                tempA(:,:,iCond) = data.exp(iCond,1).OrData(:,:,iSub);
+            end       
+            eachSubLatencyBin(iCond,:) = binTimeTransf(data.sub(iSub,1).exp(iCond,1).latency,Baseline,SampleRate,1);
+        end
+        
+
+        plotTimeRange  = squeeze(TimeRange(iSub,:,:))';
+        
+        %----- incase there is only one subject and one condition ---/
+        % added by yang at 20150809         
+        if size(plotTimeRange,1) == 2 && size(plotTimeRange,2) == 1
+            plotTimeRange = plotTimeRange';
+        end
+        %------------------------------------------------------------\
+        for ichan = 1:size(chanName,1)
+            subplot(subplotRows,subplotColumns,ichan);
+
+            if iSub == 1&& ichan ==1
+                figPostion    = get(gcf,'Position');
+                figPostion(3) = round(figPostion(4)*2.5);
+
+                set(gcf,'Position',figPostion);
+            end
+
+            erph = plot(squeeze(tempA(:,ichan,:)),'LineStyle','-');
+            set(gca,'Box','off'); hold on;
+
+
+            ylim = get(gca,'YLim');
+            xlim([1 size(tempA,1)]);
+
+            switch plotOption
+                case 'latency'
+                    %------- plot the latency line --------------/
+                    line(repmat(eachSubLatencyBin(:,ichan)',2,1),repmat(ylim'*0.8,1,size(tempA,3)),'Color',[1 0 0]);
+                    %--------------------------------------------\
+                case 'range'
+                    if size(unique(plotTimeRange,'rows'),1)>1
+                        %------ draw a fill box for each ERP waveform ----------/
+                        for iCon = 1:size(plotTimeRange,2)
+                            fill(plotTimeRange(iCon,[1 2 2 1]),ylim([1 1 2 2])*0.8,get(erph(iCon),'Color'),'EdgeColor','none','FaceAlpha',0.3);
+                        end
+                        %-------------------------------------------------------\
+                    else
+                        %----- draw only one filled box ------------------------/
+                         fill(plotTimeRange(1,[1 2 2 1]),ylim([1 1 2 2])*0.8,[.7 .7 .7],'EdgeColor','none','FaceAlpha',0.5);
+                        %-------------------------------------------------------\
+                    end
+
+                otherwise
+                    % to be continue .....
+            end
+            
+%            
+            %----- draw the reference lines (i.e., zero line and tick lines)  ------------/
+            line([1 size(tempA(:,ichan,:),1)],[0 0],'Color',[0.5 .5 .5],'LineStyle','--');%
+
+%             xticks = get(gca,'XTick');
+            
+            xtickLabel = binTimeTransf([1,size(tempA,1)],Baseline,SampleRate,2); % bin to time
+            xtickLabel = round(xtickLabel(1):200:xtickLabel(2));
+            
+            xticks      = binTimeTransf(xtickLabel,Baseline,SampleRate,1); % bin to time
+            set(gca,'XTick',xticks);
+            set(gca,'XTickLabel',xtickLabel);
+            %-----------------------------------------------------------------------------\
+            
+            view(0,-90);
+
+            if ichan==1
+               hl= legend(data.con_name,'Location','NorthEast','interpreter','none');
+               set(hl,'Box','off');
+               
+                title(['Subject ',num2str(totsub(iSub)),' ',char(chanName(ichan,:))]);
+            else
+                title(char(chanName(ichan,:)),'interpreter','none');
+            end
+
+            hold off
+        end % ichan
+
+            switch plotOption
+                case 'latency'
+                        print(gcf,'-dpsc2','-append',['latencyDetec_',date]);
+                case 'range'
+                        print(gcf,'-dpsc2','-append',['CheckWindDetec_',date]);
+                otherwise
+                    error();
+            end
+
+        %--- clean figure ---/
+        clf; % close(gcf);
+        %--------------------\
+    end % iSub
+    
+    close(gcf);
+    %%%%%%% plot end   %%%%%%%%%%%%%%%
+    
+	data.TLatency   = TLatency;
+	data.Tamplitude = Tamplitude;
+    
+	titleString     = [];
+	telectrodeNames = [];
+	electrodeNames  = electrodeNames(:);
+    
+    for i=1:size(data.TLatency,2)
+        if rem(i,size(data.TLatency,2)/length(data.con_name))==1%&&i<size(data.TLatency,2)
+			titleString     =[titleString;data.con_name{ceil(i/(size(data.TLatency,2)/length(data.con_name)))}]; %#ok<AGROW>
+			telectrodeNames =[telectrodeNames;electrodeNames]; %#ok<AGROW>
+        else
+            titleString=[titleString;{''}]; %#ok<AGROW>
+        end
+    end
+    
+    try
+        titleString      =[titleString';telectrodeNames'];
+        data.titleString = titleString;
+    catch
+        data.titleString = titleString;
+    end
+    
+    %  out put the datum into excel file
+    % if ~strcmpi(OPparameter,'none')
+    %
+    %
+    %     OPfilename=[num2str(analysisParameter.TimeRange(1,1,1)),'-',num2str(analysisParameter.TimeRange(1,2,1)),'_'];
+    %     warning off MATLAB:xlswrite:AddSheet
+    %
+    %
+    %     if strcmpi(OPparameter,'both')
+    %         OPfilename=[OPfilename,'ampli and latencies.xls'];
+    %         total=[titleString;num2cell(data.Tamplitude)];
+    %         totallatency=[titleString;num2cell(data.TLatency)];
+    %         save debug
+    %         xlswrite(fullfile(filepath,OPfilename),totallatency,'latencies');
+    %         xlswrite(fullfile(filepath,OPfilename),total,'amplitudes');
+    %     elseif strcmpi(OPparameter,'ampli')
+    %         warning off MATLAB:xlswrite:AddSheet
+    %         total=[titleString;num2cell(data.Tamplitude)];
+    %         xlswrite(fullfile(filepath,OPfilename),total,'amplitudes');
+    %     elseif strcmpi(OPparameter,'latency')
+    %         OPfilename=[OPfilename,'latencies.xls'];
+    %         total=[titleString;num2cell(data.TLatency)];
+    %         xlswrite(fullfile(filepath,OPfilename),total,'latencies');
+    %     end
+    % end
+    %%
+    
+    % save PeakDetectionInfo filepath
+    disp('***********************************************');
+    disp('*                                            *');
+    disp('The procedure has been finished Successfully!!!');
+    disp('*                                            *');
+    disp('**********************************************');
+    
+    diary off;
+    
+catch ERPdectError
+    diary off;
+    save ERPdectLine_debug
+    rethrow(ERPdectError);
+end
+end
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% sub function to excutive the fractional area technique
+%See luck 2005
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function [amplitude, loc] = fractionArea(data,PeakCritertion,polarDirection)
+
+if ~polarDirection
+    data(data>0)   = 0;
+else
+    data(data<0)   = 0;
+end
+
+databack = data;
+
+direction = sum(data)>0;% for positivety electrodes
+
+disp(['electrodes'' polar in the defined timewindow [0 for nagtive] : ', num2str(direction)])
+
+temp              = data(:,direction);
+temp(temp<0)      = 0;
+data(:,direction) = temp;
+
+
+temp               = data(:,~direction);
+temp(temp>0)       = 0;
+data(:,~direction) = temp;
+data               = abs(data);
+
+
+data = cumsum(data)-(ones(size(data,1),1)*sum(data)*PeakCritertion);
+data = data<= 0;
+loc  = sum(data);
+
+amplitude = databack((cumsum(ones(1,size(data,2)))-1)*size(data,1)+loc);
+
+
+end
+
+
+%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%
+function [amplitude, loc]=relativeAmpli(data,PeakCritertion,polarDirection) %#ok<INUSD>
+
+% if ~polarDirection
+%     data(data>0)=0;
+% else
+%     data(data<0)=0;
+% end
+
+databack    = data;
+ERPpeaks    = zeros(size(data));
+
+
+direction          =sum(data)>0;% for positivety electrodes
+disp(['electrodes'' polar in the defined timewindow [0 for nagtive] : ', num2str(direction)]);
+
+temp                  = data(:,direction);
+tempMax               = max(temp);
+ERPpeaks(:,direction) = repmat(tempMax,size(data,1),1);
+
+
+temp                   = data(:,~direction);
+tempMin                = min(temp);
+ERPpeaks(:,~direction) = repmat(tempMin,size(data,1),1);
+
+
+
+
+[numused,loc] = max(sign(abs(diff(sign(databack-ERPpeaks*PeakCritertion),1,1))));
+
+loc           = loc+1;
+amplitude     = ERPpeaks(1,:);
+
+end
+
+
+
+
+%%%%%%%%%%%%
+%
+%%%%%%%%%%%%
+

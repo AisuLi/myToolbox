@@ -1,0 +1,582 @@
+function f = eventsShift(filename,varargin)
+	% eventsShift() - get event info from a Neuroscan continuous signal file.
+	%
+	% Usage:
+	%   >> f = eventsShift(filename,varargin)
+	%
+	% Inputs:
+	%   filename - name of the file with extension
+	%  e.g., 
+    % f = eventsShift(filename,'shiftMatrix',shiftMatrix,'unit','mesc');
+    %              
+	% Optional inputs:
+	%  'dataformat' - ['int16'|'int32'] default is 'int32' for 32-bit data.
+	%                 Use 'int32' for 32-bit data.
+	%  'shiftMatrix'  [double] matrix of [eventType1 shiftbins1;
+	%										...
+	%									 eventTypeN shiftbinsN]% if shiftbins is positive, move toward the furture ....
+    %  'suffix'  [string], will rename the cnt file from orignalname.cnt
+    %                           to orignalname_suffix.cnt; ['_TC', default]
+    %  'unit'    [string],  the unit of the shiftMatrix, should be of either 'mesc' (for million second) or 'bin' (for sample bin)
+  	% Outputs:
+	%  cnt          - structure with the continuous data and other informations
+	%               cnt.header
+	%               cnt.electloc
+	%               cnt.tag
+	% 2012-07-16  17:28:03
+	%  YANG ZHANG
+	%  University of Birmingham
+	%  UK
+	% 
+	%	Rev. by YangZhang on 2013-07-03: added support for full event table (i.e., each event have a spicific shift value)
+	%   Rev. by YangZhang on 2014-11-26: added a parameter 'unit' [default in 'mesc'] to define the unit of the shiftmatrix
+
+if ~isempty(varargin)
+    r=struct(varargin{:});
+else
+    r = [];
+end
+
+
+try
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % checking input parameters 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    try r.dataformat; catch, r.dataformat = 'int32'; end
+    try r.suffix; catch, r.suffix         = 'TC';    end
+    try r.unit; catch, r.unit             = 'mesc';  end
+    try
+        r.shiftMatrix;
+    catch %#ok<*CTCH>
+        help eventsShift;
+        error('have to define the shiftMatrix!');
+    end
+    
+    if isempty(r.suffix)||strcmpi(r.suffix,'_')
+        error('to avoid overwrite the raw data, ''suffix'' should not be of ['''' or ''_'']');
+    end
+
+    unit        = r.unit;
+    shiftMatrix = r.shiftMatrix;
+    
+    if ~any(strcmpi(unit,{'mesc','bin'}))
+        error('unit shoud be of either ''mesc'' or ''bin''...');
+    end
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %           BEGIN
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    [filePathOnly,filenameOnly,Ext] = fileparts(filename);
+
+    tempFileName = fullfile(filePathOnly,[filenameOnly,'_temp',Ext]);
+    if ispc
+        system(['copy /Y "',filename,'" "',tempFileName,'"']);               % Create a new temp file to avoid over-writting the raw Data 
+        system(['copy /b "',tempFileName,'"+,, "',tempFileName,'"']);        % change the modify time of the file 
+    else
+        system(['mv "',filename,'" "',tempFileName,'"']);
+        system(['touch -m "',tempFileName,'"']);  % need to be comfirmed ? 
+    end
+
+    if strcmpi(r.dataformat, 'int16')
+        bytes_per_samp = 2;
+    else
+        bytes_per_samp = 4;
+    end
+    
+    
+    disp(['Input data is a ',r.dataformat,' data...']);
+    
+    sizeEvent1 = 8  ; %%% 8  bytes for Event1
+    sizeEvent2 = 19 ; %%% 19 bytes for Event2
+    sizeEvent3 = 19 ; %%% 19 bytes for Event3
+    
+    fid = fopen(tempFileName,'r', 'l');
+    disp(['Loading file ' tempFileName ' ...'])
+    
+    h.rev               = fread(fid,12,'char');
+    h.nextfile          = fread(fid,1,'long');
+    h.prevfile          = fread(fid,1,'ulong');
+    h.type              = fread(fid,1,'char');
+    h.id                = fread(fid,20,'char');
+    h.oper              = fread(fid,20,'char');
+    h.doctor            = fread(fid,20,'char');
+    h.referral          = fread(fid,20,'char');
+    h.hospital          = fread(fid,20,'char');
+    h.patient           = fread(fid,20,'char');
+    h.age               = fread(fid,1,'short');
+    h.sex               = fread(fid,1,'char');
+    h.hand              = fread(fid,1,'char');
+    h.med               = fread(fid,20, 'char');
+    h.category          = fread(fid,20, 'char');
+    h.state             = fread(fid,20, 'char');
+    h.label             = fread(fid,20, 'char');
+    h.date              = fread(fid,10, 'char');
+    h.time              = fread(fid,12, 'char');
+    h.mean_age          = fread(fid,1,'float');
+    h.stdev             = fread(fid,1,'float');
+    h.n                 = fread(fid,1,'short');
+    h.compfile          = fread(fid,38,'char');
+    h.spectwincomp      = fread(fid,1,'float');
+    h.meanaccuracy      = fread(fid,1,'float');
+    h.meanlatency       = fread(fid,1,'float');
+    h.sortfile          = fread(fid,46,'char');
+    h.numevents         = fread(fid,1,'int');
+    h.compoper          = fread(fid,1,'char');
+    h.avgmode           = fread(fid,1,'char');
+    h.review            = fread(fid,1,'char');
+    h.nsweeps           = fread(fid,1,'ushort');
+    h.compsweeps        = fread(fid,1,'ushort');
+    h.acceptcnt         = fread(fid,1,'ushort');
+    h.rejectcnt         = fread(fid,1,'ushort');
+    h.pnts              = fread(fid,1,'ushort');
+    h.nchannels         = fread(fid,1,'ushort');
+    h.avgupdate         = fread(fid,1,'ushort');
+    h.domain            = fread(fid,1,'char');
+    h.variance          = fread(fid,1,'char');
+    h.rate              = fread(fid,1,'ushort');
+    h.scale             = fread(fid,1,'double');
+    h.veogcorrect       = fread(fid,1,'char');
+    h.heogcorrect       = fread(fid,1,'char');
+    h.aux1correct       = fread(fid,1,'char');
+    h.aux2correct       = fread(fid,1,'char');
+    h.veogtrig          = fread(fid,1,'float');
+    h.heogtrig          = fread(fid,1,'float');
+    h.aux1trig          = fread(fid,1,'float');
+    h.aux2trig          = fread(fid,1,'float');
+    h.heogchnl          = fread(fid,1,'short');
+    h.veogchnl          = fread(fid,1,'short');
+    h.aux1chnl          = fread(fid,1,'short');
+    h.aux2chnl          = fread(fid,1,'short');
+    h.veogdir           = fread(fid,1,'char');
+    h.heogdir           = fread(fid,1,'char');
+    h.aux1dir           = fread(fid,1,'char');
+    h.aux2dir           = fread(fid,1,'char');
+    h.veog_n            = fread(fid,1,'short');
+    h.heog_n            = fread(fid,1,'short');
+    h.aux1_n            = fread(fid,1,'short');
+    h.aux2_n            = fread(fid,1,'short');
+    h.veogmaxcnt        = fread(fid,1,'short');
+    h.heogmaxcnt        = fread(fid,1,'short');
+    h.aux1maxcnt        = fread(fid,1,'short');
+    h.aux2maxcnt        = fread(fid,1,'short');
+    h.veogmethod        = fread(fid,1,'char');
+    h.heogmethod        = fread(fid,1,'char');
+    h.aux1method        = fread(fid,1,'char');
+    h.aux2method        = fread(fid,1,'char');
+    h.ampsensitivity    = fread(fid,1,'float');
+    h.lowpass           = fread(fid,1,'char');
+    h.highpass          = fread(fid,1,'char');
+    h.notch             = fread(fid,1,'char');
+    h.autoclipadd       = fread(fid,1,'char');
+    h.baseline          = fread(fid,1,'char');
+    h.offstart          = fread(fid,1,'float');
+    h.offstop           = fread(fid,1,'float');
+    h.reject            = fread(fid,1,'char');
+    h.rejstart          = fread(fid,1,'float');
+    h.rejstop           = fread(fid,1,'float');
+    h.rejmin            = fread(fid,1,'float');
+    h.rejmax            = fread(fid,1,'float');
+    h.trigtype          = fread(fid,1,'char');
+    h.trigval           = fread(fid,1,'float');
+    h.trigchnl          = fread(fid,1,'char');
+    h.trigmask          = fread(fid,1,'short');
+    h.trigisi           = fread(fid,1,'float');
+    h.trigmin           = fread(fid,1,'float');
+    h.trigmax           = fread(fid,1,'float');
+    h.trigdir           = fread(fid,1,'char');
+    h.autoscale         = fread(fid,1,'char');
+    h.n2                = fread(fid,1,'short');
+    h.dir               = fread(fid,1,'char');
+    h.dispmin           = fread(fid,1,'float');
+    h.dispmax           = fread(fid,1,'float');
+    h.xmin              = fread(fid,1,'float');
+    h.xmax              = fread(fid,1,'float');
+    h.automin           = fread(fid,1,'float');
+    h.automax           = fread(fid,1,'float');
+    h.zmin              = fread(fid,1,'float');
+    h.zmax              = fread(fid,1,'float');
+    h.lowcut            = fread(fid,1,'float');
+    h.highcut           = fread(fid,1,'float');
+    h.common            = fread(fid,1,'char');
+    h.savemode          = fread(fid,1,'char');
+    h.manmode           = fread(fid,1,'char');
+    h.ref               = fread(fid,10,'char');
+    h.rectify           = fread(fid,1,'char');
+    h.displayxmin       = fread(fid,1,'float');
+    h.displayxmax       = fread(fid,1,'float');
+    h.phase             = fread(fid,1,'char');
+    h.screen            = fread(fid,16,'char');
+    h.calmode           = fread(fid,1,'short');
+    h.calmethod         = fread(fid,1,'short');
+    h.calupdate         = fread(fid,1,'short');
+    h.calbaseline       = fread(fid,1,'short');
+    h.calsweeps         = fread(fid,1,'short');
+    h.calattenuator     = fread(fid,1,'float');
+    h.calpulsevolt      = fread(fid,1,'float');
+    h.calpulsestart     = fread(fid,1,'float');
+    h.calpulsestop      = fread(fid,1,'float');
+    h.calfreq           = fread(fid,1,'float');
+    h.taskfile          = fread(fid,34,'char');
+    h.seqfile           = fread(fid,34,'char');
+    h.spectmethod       = fread(fid,1,'char');
+    h.spectscaling      = fread(fid,1,'char');
+    h.spectwindow       = fread(fid,1,'char');
+    h.spectwinlength    = fread(fid,1,'float');
+    h.spectorder        = fread(fid,1,'char');
+    h.notchfilter       = fread(fid,1,'char');
+    h.headgain          = fread(fid,1,'short');
+    h.additionalfiles   = fread(fid,1,'int');
+    h.unused            = fread(fid,5,'char');
+    h.fspstopmethod     = fread(fid,1,'short');
+    h.fspstopmode       = fread(fid,1,'short');
+    h.fspfvalue         = fread(fid,1,'float');
+    h.fsppoint          = fread(fid,1,'short');
+    h.fspblocksize      = fread(fid,1,'short');
+    h.fspp1             = fread(fid,1,'ushort');
+    h.fspp2             = fread(fid,1,'ushort');
+    h.fspalpha          = fread(fid,1,'float');
+    h.fspnoise          = fread(fid,1,'float');
+    h.fspv1             = fread(fid,1,'short');
+    h.montage           = fread(fid,40,'char');
+    h.eventfile         = fread(fid,40,'char');
+    h.fratio            = fread(fid,1,'float');
+    h.minor_rev         = fread(fid,1,'char');
+    h.eegupdate         = fread(fid,1,'short');
+    h.compressed        = fread(fid,1,'char');
+    h.xscale            = fread(fid,1,'float');
+    h.yscale            = fread(fid,1,'float');
+    h.xsize             = fread(fid,1,'float');
+    h.ysize             = fread(fid,1,'float');
+    h.acmode            = fread(fid,1,'char');
+    h.commonchnl        = fread(fid,1,'uchar');
+    h.xtics             = fread(fid,1,'char');
+    h.xrange            = fread(fid,1,'char');
+    h.ytics             = fread(fid,1,'char');
+    h.yrange            = fread(fid,1,'char');
+    h.xscalevalue       = fread(fid,1,'float');
+    h.xscaleinterval    = fread(fid,1,'float');
+    h.yscalevalue       = fread(fid,1,'float');
+    h.yscaleinterval    = fread(fid,1,'float');
+    h.scaletoolx1       = fread(fid,1,'float');
+    h.scaletooly1       = fread(fid,1,'float');
+    h.scaletoolx2       = fread(fid,1,'float');
+    h.scaletooly2       = fread(fid,1,'float');
+    h.port              = fread(fid,1,'short');
+    h.numsamples        = fread(fid,1,'ulong');
+    h.filterflag        = fread(fid,1,'char');
+    h.lowcutoff         = fread(fid,1,'float');
+    h.lowpoles          = fread(fid,1,'short');
+    h.highcutoff        = fread(fid,1,'float');
+    h.highpoles         = fread(fid,1,'short');
+    h.filtertype        = fread(fid,1,'char');
+    h.filterdomain      = fread(fid,1,'char');
+    h.snrflag           = fread(fid,1,'char');
+    h.coherenceflag     = fread(fid,1,'char');
+    h.continuoustype    = fread(fid,1,'char');
+    h.eventtablepos     = fread(fid,1,'ulong');
+    h.continuousseconds = fread(fid,1,'float');
+    h.channeloffset     = fread(fid,1,'long');
+    h.autocorrectflag   = fread(fid,1,'char');
+    h.dcthreshold       = fread(fid,1,'uchar');
+
+    %------- change trigger shift matrix unit into sample bin ------------/
+    if strcmpi(unit,'mesc')
+        shiftMatrix(:,2) = round(shiftMatrix(:,2)*h.rate/1000);
+    end
+    %---------------------------------------------------------------------\
+    disp(['sampling rate: ',num2str(h.rate)]);
+    %-------------------------------------------------------
+    ET_offset = (double(h.prevfile) * (2^32)) + double(h.eventtablepos);    % prevfile contains high order bits of event table offset, eventtablepos contains the low order bits
+    
+    fseek(fid, ET_offset, 'bof');
+    
+    disp('Reading Event Table...');
+    eT.teeg   = fread(fid,1,'uchar');
+    eT.size   = fread(fid,1,'ulong');
+    eT.offset = fread(fid,1,'ulong');
+
+    
+    if eT.teeg==2
+        nevents=eT.size/sizeEvent2;        
+        if nevents > 0
+            ev2(nevents).stimtype  = [];
+            for i=1:nevents
+                ev2(i).stimtype      = fread(fid,1,'ushort'); 
+                ev2(i).keyboard      = fread(fid,1,'char');
+                temp                 = fread(fid,1,'uint8');
+                ev2(i).keypad_accept = bitand(15,temp);
+                ev2(i).accept_ev1    = bitshift(temp,-4);
+                ev2(i).offset        = fread(fid,1,'long');
+                ev2(i).type          = fread(fid,1,'short');
+                ev2(i).code          = fread(fid,1,'short');
+                ev2(i).latency       = fread(fid,1,'float');
+                ev2(i).epochevent    = fread(fid,1,'char');
+                ev2(i).accept        = fread(fid,1,'char');
+                ev2(i).accuracy      = fread(fid,1,'char');
+            end
+        else
+            ev2 = [];
+        end;
+    elseif eT.teeg==3  % type 3 is similar to type 2 except the offset field encodes the global sample frame
+        nevents=eT.size/sizeEvent3;
+        if nevents > 0
+            ev2(nevents).stimtype  = [];
+            
+            for i=1:nevents
+                ev2(i).stimtype      = fread(fid,1,'ushort');
+                ev2(i).keyboard      = fread(fid,1,'char');
+                temp                 = fread(fid,1,'uint8');
+                ev2(i).keypad_accept = bitand(15,temp);
+                ev2(i).accept_ev1    = bitshift(temp,-4);
+                os                   = fread(fid,1,'ulong');
+                ev2(i).offset        = os * bytes_per_samp * h.nchannels;
+                ev2(i).type          = fread(fid,1,'short');
+                ev2(i).code          = fread(fid,1,'short');
+                ev2(i).latency       = fread(fid,1,'float');
+                ev2(i).epochevent    = fread(fid,1,'char');
+                ev2(i).accept        = fread(fid,1,'char');
+                ev2(i).accuracy      = fread(fid,1,'char');
+            end
+        else
+            ev2 = [];
+        end;
+    elseif eT.teeg==1
+        nevents=eT.size/sizeEvent1;
+        if nevents > 0
+            ev2(nevents).stimtype  = [];
+            for i=1:nevents
+                ev2(i).stimtype      = fread(fid,1,'ushort');
+                ev2(i).keyboard      = fread(fid,1,'char');
+                temp                 = fread(fid,1,'uint8');
+                ev2(i).keypad_accept = bitand(15,temp);
+                ev2(i).accept_ev1    = bitshift(temp,-4);
+                ev2(i).offset        = fread(fid,1,'long');
+            end;
+        else
+            ev2 = [];
+        end;
+    else
+        disp('Skipping event table (tag != 1,2,3 ; theoretically impossible)');
+        ev2 = [];
+    end
+    
+    
+    fseek(fid, -1, 'eof');
+    t = fread(fid,'char');
+    
+    f.header   = h;
+    f.Teeg     = eT;
+    f.tag      = t;
+    
+    %%%% to change offest in bytes to points
+    %-----------
+    ev2p = ev2;
+    ioff = 900+(h.nchannels*75); %% initial offset : header + electordes desc
+    
+    for i=1:nevents
+        ev2p(i).offset=(ev2p(i).offset-ioff)/(bytes_per_samp*h.nchannels); %% 2 short int end
+    end
+%     uint32(shiftMatrix(itype,2)*(bytes_per_samp*h.nchannels)+ double(EEG.Data(iChange).offset)); 
+    f.event = ev2p;
+    %-----------
+    fclose(fid); % close the openned file
+
+    stimTypes      = [ev2(:).stimtype];
+    orignalStimIdx = 1:numel(stimTypes);
+    
+    disp(' ');
+    disp('--------------------------------------');
+    for iChange = 1: size(shiftMatrix,1)
+        disp(['type = ',sprintf('%4.0d',shiftMatrix(iChange,1)),': delay ',sprintf('%4.0d',shiftMatrix(iChange,2)),' sample bins']);
+    end
+    disp('--------------------------------------');
+    disp(' ');
+
+	%--------- determine whether it is a table including all events -------/ %	Rev. by YangZhang on 2013-07-03: 
+	if (numel(unique(shiftMatrix(:,1)))==numel(shiftMatrix(:,1)))
+		isShiftMatrixEventTypes = true;
+	else
+		isShiftMatrixEventTypes = false;
+	end
+	
+	if ~isShiftMatrixEventTypes
+        % bechangedStimIdx = 1:numel(stimTypes);
+        minEventsNum        = min([numel(stimTypes),numel(shiftMatrix(:,1))]);
+
+        bechangedStimIdx             = ismember(stimTypes,unique(shiftMatrix(:,1)));
+        stimTypes(~bechangedStimIdx) = [];
+        bechangedStimIdx             = find(bechangedStimIdx);
+
+		if ~(shiftMatrix(1:minEventsNum,1)==stimTypes(1:minEventsNum)')
+			error(['Unmatched Event type, the last matched line was ',num2str(find(~(shiftMatrix(1:minEventsNum,1)==stimTypes(1:minEventsNum)'),1,'first') - 1),' please check it carefully!']);
+		end
+	end
+	%----------------------------------------------------------------------\ %	Rev. by YangZhang on 2013-07-03: 
+    if minEventsNum < size(shiftMatrix,1)
+        warning('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+        warning('the shiftMarix contains different event numbers than the events in the cnt file!');
+        warning('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    end
+    
+    %====================================================
+    % memory map the file and change the offset values
+    %====================================================
+    switch eT.teeg
+        case 1
+            
+            EEG = memmapfile(tempFileName,'Offset',ET_offset+9,...
+                'Format',{...
+                'uint16',[1 1],'stimtype';...
+                'uint8', [1 1],'keyboard';...
+                'uint8', [1 1],'keypad_accept';...
+                'uint32',[1 1],'offset'},...
+                'Repeat',nevents,...
+                'Writable',true);
+            
+				if isShiftMatrixEventTypes
+					for itype =1: size(shiftMatrix,1)
+						beChangeMembers = find(ismember(stimTypes,shiftMatrix(itype,1) ) );
+                
+						for iChange = beChangeMembers
+							EEG.Data(iChange).offset =uint32(shiftMatrix(itype,2)*(bytes_per_samp*h.nchannels)+ double(EEG.Data(iChange).offset)); 
+						end
+                
+					end
+				else %	Rev. by YangZhang on 2013-07-03: 
+					for iChange = 1:minEventsNum
+                        orderNumInCntStim = bechangedStimIdx(iChange);
+                        if shiftMatrix(iChange,2)~=0
+						  EEG.Data(orderNumInCntStim).offset =uint32(shiftMatrix(iChange,2)*(bytes_per_samp*h.nchannels)+ double(EEG.Data(orderNumInCntStim).offset)); 
+                        end
+					end
+				end
+            
+        case 2
+            
+            EEG = memmapfile(tempFileName,'Offset',ET_offset+9,...
+                'Format',{...
+                'uint16',[1 1],'stimtype';...
+                'uint8', [1 1],'keyboard';...
+                'uint8', [1 1],'keypad_accept';...
+                'uint32',[1 1],'offset';...
+                'int16', [1 1],'type';...
+                'int16', [1 1],'code';...
+                'single',[1 1],'latency';...
+                'uint8', [1 1],'epochevent';...
+                'uint8', [1 1],'accept';...
+                'uint8', [1 1],'accuracy'},...
+                'Repeat',nevents,...
+                'Writable',true);
+            
+%             ev2(i).stimtype      = fread(fid,1,'ushort');
+%             ev2(i).keyboard      = fread(fid,1,'char');             
+%             temp                 = fread(fid,1,'uint8');         
+%             ev2(i).offset        = fread(fid,1,'long');
+%             ev2(i).type          = fread(fid,1,'short');
+%             ev2(i).code          = fread(fid,1,'short');
+%             ev2(i).latency       = fread(fid,1,'float');
+%             ev2(i).epochevent    = fread(fid,1,'char');
+%             ev2(i).accept        = fread(fid,1,'char');
+%             ev2(i).accuracy      = fread(fid,1,'char');
+			if isShiftMatrixEventTypes           
+				for itype = 1:size(shiftMatrix,1)
+					beChangeMembers = find(ismember(stimTypes,shiftMatrix(itype,1) ) );
+			                
+					disp(['Type ',sprintf('%4.0d',shiftMatrix(itype,1)),', Changed Bins: ',sprintf('%d ',beChangeMembers(:)')]);
+					for iChange = beChangeMembers
+						EEG.Data(iChange).offset =uint32(shiftMatrix(itype,2)*(bytes_per_samp*h.nchannels)+ double(EEG.Data(iChange).offset));
+					end
+				end
+						
+			else %	Rev. by YangZhang on 2013-07-03: 
+				for iChange = 1:minEventsNum
+                    orderNumInCntStim = bechangedStimIdx(iChange);
+                    if shiftMatrix(iChange,2)~=0
+					   EEG.Data(orderNumInCntStim).offset =uint32(shiftMatrix(iChange,2)*(bytes_per_samp*h.nchannels)+ double(EEG.Data(orderNumInCntStim).offset)); 
+                    end
+				end
+			end
+            
+        case 3
+            EEG = memmapfile(tempFileName,'Offset',ET_offset+9,...
+                'Format',{...
+                'uint16',[1 1],'stimtype';...
+                'uint8', [1 1],'keyboard';...
+                'uint8', [1 1],'keypad_accept';...
+                'uint32',[1 1],'offset';...
+                'int16', [1 1],'type';...
+                'int16', [1 1],'code';...
+                'single',[1 1],'latency';...
+                'uint8', [1 1],'epochevent';...
+                'uint8', [1 1],'accept';...
+                'uint8', [1 1],'accuracy'},...
+                'Repeat',nevents,...
+                'Writable',true);
+            
+            % ev2(i).offset = os * bytes_per_samp * h.nchannels;
+			if isShiftMatrixEventTypes   
+				for itype =1: size(shiftMatrix,1)
+					beChangeMembers = find(ismember(stimTypes,shiftMatrix(itype,1) ) );
+                
+					for iChange = beChangeMembers
+						EEG.Data(iChange).offset =uint32(shiftMatrix(itype,2)+ double(EEG.Data(iChange).offset)); 
+						%  EEG.Data(iChange).offset = uint32(((double(ev2p(iChange).offset) + shiftMatrix(itype,2)) * (bytes_per_samp*h.nchannels) + ioff)/ (bytes_per_samp * h.nchannels));
+					end
+				end
+			
+			
+			else %	Rev. by YangZhang on 2013-07-03: 
+				for iChange = 1:minEventsNum
+                    orderNumInCntStim = bechangedStimIdx(iChange);
+                    if shiftMatrix(iChange,2)~=0
+					   EEG.Data(orderNumInCntStim).offset =uint32(shiftMatrix(iChange,2)*(bytes_per_samp*h.nchannels)+ double(EEG.Data(orderNumInCntStim).offset)); 
+                    end
+				end
+			end
+            
+        otherwise
+            disp('Skipping event table (tag != 1,2,3 ; theoretically impossible)');
+    end
+    
+    
+    
+    %--- free memory ----/
+    clear EEG
+    %--------------------\
+    
+    
+    if ~isempty(r.suffix)
+        if r.suffix(1)=='_';
+            r.suffix(1)=[];
+        end
+        %-----rename cnt file -----/
+        [filePathOnly,filenameOnly,Exe] = fileparts(filename);
+        targetFilename = fullfile(filePathOnly,[filenameOnly,'_',r.suffix,Exe]);
+        if ispc
+            if exist(targetFilename,'file')
+                system(['del /F/Q "',targetFilename,'"']);
+                emptyRecyclebin(filePathOnly);
+            end
+            system(['ren "',tempFileName,'" "',filenameOnly,'_',r.suffix,Exe,'"']);
+        else
+            renamefile(tempFileName,fullfile(filePathOnly,[filenameOnly,'_',r.suffix,Exe]));
+        end
+        %---------------------------\
+    end
+    % if ispc
+    %     eval(['!ren "',FILENAME,'" "',[newFileName,ext],'"']);
+    % else
+    %     eval(['!mv "',FILENAME,'" "',outPUTFILEname,'"']);
+    % end
+    
+    
+    
+    
+catch eventsShift_Error
+    try
+        fclose(fid);
+    catch %#ok<CTCH>
+    end
+    save eventsShift_Error_debug;
+    rethrow(eventsShift_Error);
+end
+
